@@ -15,6 +15,7 @@ import os
 import platform
 import re
 import shutil
+import unicodedata
 from pathlib import Path
 
 
@@ -22,9 +23,15 @@ INDEX_FILE = Path.home() / ".app_agent_index.json"
 
 
 def _normalize(name: str) -> str:
-    """Deixa o nome minúsculo e sem caracteres estranhos, para facilitar o match."""
+    """
+    Deixa o nome minúsculo, sem acentos e sem caracteres estranhos,
+    para facilitar o match (ex: "Configurações" -> "configuracoes").
+    """
     name = name.lower().strip()
     name = re.sub(r"\.(exe|desktop|app)$", "", name)
+    # remove acentos (á->a, ç->c, ã->a...) em vez de apagar a letra inteira
+    name = unicodedata.normalize("NFKD", name)
+    name = name.encode("ascii", "ignore").decode("ascii")
     name = re.sub(r"[^a-z0-9\s]", "", name)
     return name.strip()
 
@@ -58,8 +65,12 @@ def _scan_linux() -> dict[str, str]:
             if not exec_bin:
                 continue
 
-            apps[_normalize(pretty_name)] = exec_bin
-            apps[_normalize(f.stem)] = exec_bin  # também indexa pelo slug do arquivo
+            apps_normalized_pretty = _normalize(pretty_name)
+            apps_normalized_stem = _normalize(f.stem)
+            if apps_normalized_pretty:
+                apps[apps_normalized_pretty] = exec_bin
+            if apps_normalized_stem:
+                apps[apps_normalized_stem] = exec_bin  # também indexa pelo slug do arquivo
 
     # 2) Executáveis soltos no PATH (fallback, cobre CLIs sem .desktop)
     for path_dir in os.environ.get("PATH", "").split(os.pathsep):
@@ -68,7 +79,9 @@ def _scan_linux() -> dict[str, str]:
             continue
         for exe in p.iterdir():
             if os.access(exe, os.X_OK) and exe.is_file():
-                apps.setdefault(_normalize(exe.name), str(exe))
+                normalized = _normalize(exe.name)
+                if normalized:  # ignora nomes tipo "[" que viram string vazia
+                    apps.setdefault(normalized, str(exe))
 
     return apps
 
@@ -127,13 +140,27 @@ def resolve_app(name: str, index: dict[str, str] | None = None) -> str | None:
     index = index if index is not None else build_index()
     key = _normalize(name)
 
+    if not key:
+        return None
+
     if key in index:
         return index[key]
 
-    # match parcial: "vscode" dentro de "visual studio code"
-    for k, v in index.items():
-        if key in k or k in key:
-            return v
+    # match parcial: "vscode" dentro de "visual studio code".
+    # Exige um tamanho mínimo dos dois lados para não bater com nomes
+    # curtos/vazios por acaso (ex: "[" normalizado vira "").
+    MIN_LEN = 3
+    best_match: tuple[str, str] | None = None
+    if len(key) >= MIN_LEN:
+        for k, v in index.items():
+            if len(k) < MIN_LEN:
+                continue
+            if key in k or k in key:
+                # prefere o match mais "próximo" (diferença de tamanho menor)
+                if best_match is None or abs(len(k) - len(key)) < abs(len(best_match[0]) - len(key)):
+                    best_match = (k, v)
+    if best_match:
+        return best_match[1]
 
     # fallback: tenta achar no PATH diretamente (ex: comandos simples)
     return shutil.which(name)

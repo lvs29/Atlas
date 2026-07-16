@@ -3,3 +3,5 @@ requests>=2.31.0
 
 # Backend nuvem (Anthropic) - opcional, só se LLM_BACKEND=anthropic
 anthropic>=0.40.0
+
+beautifulsoup4>=4.12.0

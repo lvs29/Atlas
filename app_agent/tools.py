@@ -12,6 +12,7 @@ import urllib.parse
 from typing import Any, Callable
 
 from . import scanner
+from . import web_search as web_search_module
 
 
 def open_app(params: dict[str, Any]) -> str:
@@ -61,12 +62,19 @@ def list_known_apps(params: dict[str, Any]) -> str:
     return f"{len(names)} apps conhecidos. Exemplos: {preview}"
 
 
+def web_search(params: dict[str, Any]) -> str:
+    """{"tool": "web.search", "query": "quem ganhou o oscar de 2026"}"""
+    query = params["query"]
+    return web_search_module.search(query)
+
+
 # Registro central: nome da tool -> função executora
 TOOLS: dict[str, Callable[[dict[str, Any]], str]] = {
     "system.open_app": open_app,
     "browser.open": open_browser,
     "system.learn_app": learn_app_location,
     "system.list_apps": list_known_apps,
+    "web.search": web_search,
 }
 
 
@@ -108,6 +116,24 @@ TOOLS_SCHEMA = [
         "name": "system.list_apps",
         "description": "Lista os apps conhecidos pelo índice atual.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "web.search",
+        "description": (
+            "Pesquisa na web em background, sem abrir nenhuma janela para o "
+            "usuário. Use quando você não souber a resposta de algo, ou "
+            "precisar de informação atual (notícias, preços, eventos "
+            "recentes, fatos que podem ter mudado). Depois de receber os "
+            "resultados, responda ao usuário em texto com um resumo da "
+            "resposta — não despeje os resultados brutos."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "termo de busca"}
+            },
+            "required": ["query"],
+        },
     },
 ]
 
