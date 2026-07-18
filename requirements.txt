@@ -1,7 +1,10 @@
 # Backend local (Ollama) - padrão
 requests>=2.31.0
 
-# Backend nuvem (Anthropic) - opcional, só se LLM_BACKEND=anthropic
-anthropic>=0.40.0
-
+# Busca web (tool web.search)
 beautifulsoup4>=4.12.0
+
+# Servidor HTTP
+fastapi>=0.115.0
+uvicorn>=0.32.0
+

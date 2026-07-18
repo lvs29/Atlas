@@ -5,10 +5,7 @@ Loop de terminal: digite um pedido em linguagem natural, o agente
 encadeia quantas tools forem necessárias (loop multi-etapas) até
 concluir a tarefa ou responder em texto.
 
-Backend padrão: Ollama local (LLM_BACKEND=ollama).
-Para usar a API da Anthropic na nuvem em vez disso:
-    export LLM_BACKEND=anthropic
-    export ANTHROPIC_API_KEY=...
+Backend: Ollama local (100% offline, sem chave de API).
 
 Uso:
     python -m app_agent.main
@@ -16,16 +13,8 @@ Uso:
 
 from __future__ import annotations
 
-import os
-
+from . import llm_ollama as llm
 from . import scanner
-
-BACKEND = os.environ.get("LLM_BACKEND", "ollama")
-
-if BACKEND == "anthropic":
-    from . import llm_anthropic as llm
-else:
-    from . import llm_ollama as llm
 
 
 def print_step(decision: dict, result: str) -> None:
@@ -35,7 +24,6 @@ def print_step(decision: dict, result: str) -> None:
 
 
 def main() -> None:
-    print(f"Backend: {BACKEND}")
     print("Indexando aplicativos instalados... (só na primeira vez)")
     scanner.build_index()
     print("Pronto! Digite um comando (ou 'sair').\n")
