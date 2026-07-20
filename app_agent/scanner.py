@@ -135,6 +135,12 @@ def build_index(force: bool = False) -> dict[str, str]:
     return index
 
 
+MIN_TOKEN_LEN = 3      # match por palavra inteira (seguro)
+MIN_SUBSTRING_LEN = 5   # match por substring cru (só como último recurso)
+
+KNOWN_BROWSERS = ["google chrome", "chrome", "firefox", "vivaldi", "brave", "microsoft edge", "edge", "opera", "chromium"]
+
+
 def resolve_app(name: str, index: dict[str, str] | None = None) -> str | None:
     """Tenta achar o executável de um app pelo nome (com aprendizado manual)."""
     index = index if index is not None else build_index()
@@ -146,24 +152,57 @@ def resolve_app(name: str, index: dict[str, str] | None = None) -> str | None:
     if key in index:
         return index[key]
 
-    # match parcial: "vscode" dentro de "visual studio code".
-    # Exige um tamanho mínimo dos dois lados para não bater com nomes
-    # curtos/vazios por acaso (ex: "[" normalizado vira "").
-    MIN_LEN = 3
-    best_match: tuple[str, str] | None = None
-    if len(key) >= MIN_LEN:
+    # 1) match por palavra inteira: "code" bate com "visual studio code",
+    # mas "cut" NÃO bate com "executavel" (que contém "cut" como substring
+    # cru, mas não como palavra própria). Isso evita falsos positivos tipo
+    # o app_agent confundir um path qualquer com o comando `cut` do shell.
+    if len(key) >= MIN_TOKEN_LEN:
+        key_tokens = set(key.split())
+        best_match: tuple[int, str] | None = None
         for k, v in index.items():
-            if len(k) < MIN_LEN:
+            if len(k) < MIN_TOKEN_LEN:
+                continue
+            k_tokens = set(k.split())
+            if key_tokens and k_tokens and (key_tokens <= k_tokens or k_tokens <= key_tokens):
+                score = abs(len(k) - len(key))
+                if best_match is None or score < best_match[0]:
+                    best_match = (score, v)
+        if best_match:
+            return best_match[1]
+
+    # 2) fallback: substring cru, só pra chaves mais longas/específicas
+    # (reduz drasticamente a chance de uma palavra curta e comum "vazar"
+    # de dentro de outra sem querer)
+    if len(key) >= MIN_SUBSTRING_LEN:
+        best_match = None
+        for k, v in index.items():
+            if len(k) < MIN_SUBSTRING_LEN:
                 continue
             if key in k or k in key:
-                # prefere o match mais "próximo" (diferença de tamanho menor)
-                if best_match is None or abs(len(k) - len(key)) < abs(len(best_match[0]) - len(key)):
-                    best_match = (k, v)
-    if best_match:
-        return best_match[1]
+                score = abs(len(k) - len(key))
+                if best_match is None or score < best_match[0]:
+                    best_match = (score, v)
+        if best_match:
+            return best_match[1]
 
     # fallback: tenta achar no PATH diretamente (ex: comandos simples)
     return shutil.which(name)
+
+
+def list_known_browsers(index: dict[str, str] | None = None) -> list[str]:
+    """Lista quais navegadores conhecidos foram encontrados no índice atual."""
+    index = index if index is not None else build_index()
+    return [name for name in KNOWN_BROWSERS if resolve_app(name, index)]
+
+
+def resolve_any_browser(index: dict[str, str] | None = None) -> tuple[str | None, str | None]:
+    """Acha QUALQUER navegador instalado, na ordem de preferência de KNOWN_BROWSERS."""
+    index = index if index is not None else build_index()
+    for name in KNOWN_BROWSERS:
+        path = resolve_app(name, index)
+        if path:
+            return path, name
+    return None, None
 
 
 def learn_app(name: str, executable_path: str) -> None:

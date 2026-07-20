@@ -11,6 +11,7 @@ import subprocess
 import urllib.parse
 from typing import Any, Callable
 
+from . import filesystem_tools
 from . import scanner
 from . import web_search as web_search_module
 
@@ -37,7 +38,13 @@ def open_browser(params: dict[str, Any]) -> str:
 
     path = scanner.resolve_app(browser)
     if not path:
-        return f"Não encontrei o navegador '{browser}' instalado."
+        known = scanner.list_known_browsers()
+        hint = (
+            f" Navegadores encontrados no sistema: {', '.join(known)}."
+            if known
+            else " Nenhum navegador conhecido foi encontrado no sistema."
+        )
+        return f"'{browser}' não é um navegador instalado.{hint}"
 
     args = [path]
     if query:
@@ -46,6 +53,24 @@ def open_browser(params: dict[str, Any]) -> str:
 
     subprocess.Popen(args)
     return f"Abrindo {browser}" + (f" pesquisando por '{query}'" if query else "")
+
+
+def open_url(params: dict[str, Any]) -> str:
+    """{"tool": "browser.open_url", "url": "https://www.youtube.com/results?search_query=mr+beast"}"""
+    url = params["url"]
+    browser_name = params.get("browser")
+
+    if browser_name:
+        path = scanner.resolve_app(browser_name)
+        used_name = browser_name
+    else:
+        path, used_name = scanner.resolve_any_browser()
+
+    if not path:
+        return "Não encontrei nenhum navegador instalado para abrir essa URL."
+
+    subprocess.Popen([path, url])
+    return f"Abrindo {url} no {used_name}"
 
 
 def learn_app_location(params: dict[str, Any]) -> str:
@@ -68,13 +93,44 @@ def web_search(params: dict[str, Any]) -> str:
     return web_search_module.search(query)
 
 
+def open_file(params: dict[str, Any]) -> str:
+    """{"tool": "filesystem.open_file", "path": "/home/user/documento.pdf"}"""
+    return filesystem_tools.open_file(params["path"])
+
+
+def list_dir(params: dict[str, Any]) -> str:
+    """{"tool": "filesystem.list_dir", "path": "/home/user/Downloads"}"""
+    return filesystem_tools.list_dir(params.get("path"))
+
+
+def read_file(params: dict[str, Any]) -> str:
+    """{"tool": "filesystem.read_file", "path": "/home/user/notas.txt"}"""
+    return filesystem_tools.read_file(params["path"])
+
+
+def download_file(params: dict[str, Any]) -> str:
+    """{"tool": "web.download", "url": "https://exemplo.com/arquivo.pdf"}"""
+    return web_search_module.download(params["url"], params.get("filename"))
+
+
+def fetch_page(params: dict[str, Any]) -> str:
+    """{"tool": "web.fetch_page", "url": "https://exemplo.com/artigo"}"""
+    return web_search_module.fetch_page(params["url"])
+
+
 # Registro central: nome da tool -> função executora
 TOOLS: dict[str, Callable[[dict[str, Any]], str]] = {
     "system.open_app": open_app,
     "browser.open": open_browser,
+    "browser.open_url": open_url,
     "system.learn_app": learn_app_location,
     "system.list_apps": list_known_apps,
     "web.search": web_search,
+    "filesystem.open_file": open_file,
+    "filesystem.list_dir": list_dir,
+    "filesystem.read_file": read_file,
+    "web.download": download_file,
+    "web.fetch_page": fetch_page,
 }
 
 
@@ -90,14 +146,38 @@ TOOLS_SCHEMA = [
     },
     {
         "name": "browser.open",
-        "description": "Abre um navegador, opcionalmente já pesquisando um termo.",
+        "description": (
+            "Abre um navegador, opcionalmente já pesquisando um termo no "
+            "Google. IMPORTANTE: 'browser' precisa ser o nome de um "
+            "navegador de verdade instalado (chrome, firefox, vivaldi, "
+            "edge...) — nunca o nome de um site (não use 'youtube', "
+            "'google', etc). Para abrir um site específico, use "
+            "browser.open_url."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "browser": {"type": "string", "description": "ex: chrome, firefox"},
-                "query": {"type": "string", "description": "termo de pesquisa (opcional)"},
+                "browser": {"type": "string", "description": "nome do navegador instalado, ex: chrome, firefox"},
+                "query": {"type": "string", "description": "termo de pesquisa no Google (opcional)"},
             },
             "required": ["browser"],
+        },
+    },
+    {
+        "name": "browser.open_url",
+        "description": (
+            "Abre uma URL completa e específica no navegador (ex: um site "
+            "direto, um resultado de busca do YouTube, um link encontrado "
+            "por web.fetch_page). Use esta tool em vez de browser.open "
+            "quando você já tem a URL exata que quer abrir."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL completa a abrir"},
+                "browser": {"type": "string", "description": "navegador a usar (opcional; usa o primeiro encontrado se omitido)"},
+            },
+            "required": ["url"],
         },
     },
     {
@@ -135,14 +215,66 @@ TOOLS_SCHEMA = [
             "required": ["query"],
         },
     },
+    {
+        "name": "filesystem.open_file",
+        "description": "Abre um arquivo específico (caminho completo) com o programa padrão do sistema.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "caminho completo do arquivo"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "filesystem.list_dir",
+        "description": "Lista os arquivos e pastas dentro de uma pasta. Se 'path' não for informado, usa a pasta do usuário.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "caminho da pasta (opcional)"}},
+        },
+    },
+    {
+        "name": "filesystem.read_file",
+        "description": "Lê o conteúdo de um arquivo de texto (trunca se for muito grande).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "caminho completo do arquivo"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "web.download",
+        "description": "Baixa um arquivo de uma URL para a pasta de downloads do agente (~/app_agent_downloads).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL do arquivo"},
+                "filename": {"type": "string", "description": "nome do arquivo salvo (opcional)"},
+            },
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "web.fetch_page",
+        "description": (
+            "Lê o texto de uma página web específica (só leitura — não "
+            "clica em nada, não preenche formulário, não faz login). Use "
+            "quando o usuário mandar um link e pedir pra ler/resumir o "
+            "conteúdo."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "URL da página"}},
+            "required": ["url"],
+        },
+    },
 ]
 
 
 def to_openai_format(schema: list[dict]) -> list[dict]:
     """
-    Converte o schema (formato Anthropic: name/description/input_schema)
-    para o formato OpenAI-style (type/function/parameters), usado pelo
-    Ollama e por outros runtimes locais compatíveis.
+    Converte o schema (formato name/description/input_schema) para o
+    formato OpenAI-style (type/function/parameters), usado pelo Ollama
+    e por outros runtimes locais compatíveis.
     """
     return [
         {
